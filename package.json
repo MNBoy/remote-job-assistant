@@ -1,0 +1,48 @@
+{
+    "name": "remote-extension",
+    "version": "1.0.0",
+    "description": "Chrome extension for automating remote job applications",
+    "scripts": {
+        "build": "webpack --config webpack.config.js",
+        "start:server": "ts-node --transpile-only server/index.ts",
+        "dev": "concurrently \"npm run build -- --watch\" \"npm run start:server\"",
+        "create-icons": "node scripts/create-icons.js",
+        "postinstall": "npm run create-icons"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.2.0",
+        "axios": "^1.6.2",
+        "cors": "^2.8.5",
+        "dotenv": "^16.3.1",
+        "express": "^4.18.2",
+        "openai": "^4.17.0"
+    },
+    "devDependencies": {
+        "@babel/core": "^7.23.3",
+        "@babel/preset-env": "^7.23.3",
+        "@babel/preset-react": "^7.23.3",
+        "@babel/preset-typescript": "^7.23.3",
+        "@types/chrome": "^0.0.251",
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/node": "^20.9.4",
+        "@types/react": "^18.2.38",
+        "@types/react-dom": "^18.2.17",
+        "autoprefixer": "^10.4.16",
+        "babel-loader": "^9.1.3",
+        "concurrently": "^8.2.2",
+        "copy-webpack-plugin": "^11.0.0",
+        "css-loader": "^6.8.1",
+        "postcss": "^8.4.31",
+        "postcss-loader": "^7.3.3",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "style-loader": "^3.3.3",
+        "tailwindcss": "^3.3.5",
+        "ts-loader": "^9.5.1",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.2.2",
+        "webpack": "^5.89.0",
+        "webpack-cli": "^5.1.4"
+    }
+}
