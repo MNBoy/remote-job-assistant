@@ -103,7 +103,3 @@ The extension stores your resume directly in the browser's local storage for con
 - Resume data is sent with each form processing request
 - Edit your resume directly in the extension popup
 - Your data stays on your device for privacy
-
-## License
-
-MIT
