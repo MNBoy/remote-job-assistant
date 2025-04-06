@@ -423,7 +423,7 @@ const captureFormData = async () => {
     if (forms.length === 0) {
       // No forms found, prompt user to select a container instead
       sendStatusUpdate(
-        'info',
+        'error',
         'No forms detected on this page. Please select a container with form fields.',
         'Click on "Select Container" to choose the container that has the form fields.'
       );
@@ -593,6 +593,7 @@ const fillFormWithData = (data: Record<string, string>) => {
     }
 
     sendStatusUpdate('processing', 'Filling form fields...');
+    console.log('Form data to fill:', data);
 
     // Determine which container to use for finding and filling fields
     let container: Element | null = null;
@@ -619,93 +620,376 @@ const fillFormWithData = (data: Record<string, string>) => {
 
     // Keep track of fields we've filled
     let filledCount = 0;
+    // Keep track of fields we tried to fill
+    let attemptedFields = 0;
+    // Track errors for debugging
+    const fillErrors: Array<{ field: FormField; error: string }> = [];
+
+    // Log all form fields for debugging
+    console.log('Captured form fields:', capturedFormData.fields);
+
+    // Create a normalized version of the data keys for better matching
+    const normalizedData: Record<string, string> = {};
+    Object.keys(data).forEach((key) => {
+      normalizedData[key.toLowerCase().trim()] = data[key];
+
+      // Also add variants without special characters
+      const simplifiedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (simplifiedKey !== key.toLowerCase()) {
+        normalizedData[simplifiedKey] = data[key];
+      }
+    });
 
     // Go through each captured field and fill it if we have data
     capturedFormData.fields.forEach((field) => {
-      // Find the field by id or name
-      let element: HTMLElement | null = null;
+      try {
+        attemptedFields++;
 
-      if (field.id) {
-        // First try to find within container
-        element = container?.querySelector(`#${field.id}`) as HTMLElement;
-
-        // If not found, try document-wide (for cases where ID is unique)
-        if (!element) {
-          element = document.getElementById(field.id);
+        // Debug log for fields with complex IDs
+        if (field.id && /[^\w-]/.test(field.id)) {
+          console.log(
+            `Field has complex ID that might need special handling: "${field.id}"`,
+            field
+          );
         }
-      }
 
-      if (!element && field.name) {
-        element = container?.querySelector(
-          `[name="${field.name}"]`
-        ) as HTMLElement;
-      }
+        // Find the field by id or name
+        let element: HTMLElement | null = null;
 
-      if (!element) {
-        return; // Skip if element not found
-      }
+        // Try multiple strategies to find the element
+        if (field.id) {
+          // Strategy 1: Find by ID within container - with proper CSS escaping
+          try {
+            // CSS.escape is the proper way to escape IDs for use in selectors
+            const escapedId = CSS.escape(field.id);
+            element = container?.querySelector(`#${escapedId}`) as HTMLElement;
+          } catch (e) {
+            // Fallback if CSS.escape is not available
+            console.log(
+              'CSS.escape not available, using getElementById instead'
+            );
+          }
 
-      // Get the value from processed data
-      let value = '';
+          // Strategy 2: Find by ID document-wide - this is safer because it doesn't use CSS selectors
+          if (!element) {
+            element = document.getElementById(field.id);
+          }
+        }
 
-      // Try using id or name as key first
-      if (field.id && data[field.id]) {
-        value = data[field.id];
-      } else if (field.name && data[field.name]) {
-        value = data[field.name];
-      } else if (field.label && data[field.label]) {
-        // If no match by id/name, try by label
-        value = data[field.label];
-      }
+        // Strategy 3: Find by name - with proper escaping
+        if (!element && field.name) {
+          try {
+            const escapedName = CSS.escape(field.name);
+            element = container?.querySelector(
+              `[name="${escapedName}"]`
+            ) as HTMLElement;
 
-      if (!value) {
-        return; // Skip if no value to fill
-      }
+            if (!element) {
+              // Try to find in the entire document if not found in container
+              element = document.querySelector(
+                `[name="${escapedName}"]`
+              ) as HTMLElement;
+            }
+          } catch (e) {
+            // Fallback to a safer getElementsByName approach
+            const elements = document.getElementsByName(field.name);
+            if (elements.length > 0) {
+              element = elements[0] as HTMLElement;
+            }
+          }
+        }
 
-      // Fill based on element type
-      if (element instanceof HTMLInputElement) {
-        // Skip file inputs - cannot set values on these for security reasons
-        if (element.type === 'file') {
-          console.log('Skipping file input:', element.name || element.id);
+        // Strategy 4: If we have a label, try to find by label text
+        if (!element && field.label) {
+          // Find labels with matching text
+          try {
+            const labels = Array.from(document.querySelectorAll('label'));
+            for (const label of labels) {
+              if (
+                label.textContent?.trim().toLowerCase() ===
+                field.label.toLowerCase()
+              ) {
+                // If label has a 'for' attribute, use it to find the element
+                if (label.htmlFor) {
+                  element = document.getElementById(label.htmlFor);
+                  if (element) break;
+                }
+
+                // If no 'for' attribute or element not found, check if label wraps an input
+                const inputInLabel = label.querySelector(
+                  'input, select, textarea'
+                );
+                if (inputInLabel) {
+                  element = inputInLabel as HTMLElement;
+                  break;
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error finding element by label:', error);
+          }
+        }
+
+        // Strategy 5: Try to find input with matching placeholder
+        if (!element && field.label) {
+          try {
+            // Use a safer approach by iterating through inputs directly
+            const inputs = Array.from(
+              container.querySelectorAll('input, textarea')
+            );
+            for (const input of inputs) {
+              try {
+                const placeholder =
+                  (input as HTMLInputElement).placeholder || '';
+                if (
+                  placeholder.toLowerCase().includes(field.label.toLowerCase())
+                ) {
+                  element = input as HTMLElement;
+                  break;
+                }
+              } catch (inputError) {
+                // Skip this input if there's an issue with it
+                console.log('Error checking input placeholder:', inputError);
+              }
+            }
+          } catch (error) {
+            console.error('Error finding element by placeholder:', error);
+          }
+        }
+
+        // Strategy 6: For complex IDs, try to find by directly looking at all inputs
+        if (!element && (field.id || field.name)) {
+          try {
+            const allInputs = Array.from(
+              container.querySelectorAll('input, select, textarea')
+            );
+            for (const input of allInputs) {
+              if (
+                (field.id && input.id === field.id) ||
+                (field.name && (input as HTMLInputElement).name === field.name)
+              ) {
+                element = input as HTMLElement;
+                break;
+              }
+            }
+          } catch (error) {
+            console.error(
+              'Error finding element by direct ID/name comparison:',
+              error
+            );
+          }
+        }
+
+        // If still not found, skip this field
+        if (!element) {
           return;
         }
 
-        if (element.type === 'checkbox' || element.type === 'radio') {
-          // For checkboxes and radio buttons
-          const valueAsLower = value.toLowerCase();
-          const isChecked =
-            valueAsLower === 'yes' ||
-            valueAsLower === 'true' ||
-            valueAsLower === 'checked';
-          element.checked = isChecked;
-        } else {
-          // For text, email, etc.
-          element.value = value;
-          // Dispatch input event to trigger any listeners
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        filledCount++;
-      } else if (element instanceof HTMLSelectElement) {
-        // For select dropdowns, try to find matching option
-        const options = Array.from(element.options);
-        const matchingOption = options.find(
-          (option) =>
-            option.text.toLowerCase().includes(value.toLowerCase()) ||
-            option.value.toLowerCase() === value.toLowerCase()
-        );
+        // Get the value from processed data using multiple matching strategies
+        let value = '';
 
-        if (matchingOption) {
-          element.value = matchingOption.value;
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-          filledCount++;
+        // Strategy 1: Direct match by id, name, or label
+        if (field.id && data[field.id]) {
+          value = data[field.id];
+        } else if (field.name && data[field.name]) {
+          value = data[field.name];
+        } else if (field.label && data[field.label]) {
+          value = data[field.label];
         }
-      } else if (element instanceof HTMLTextAreaElement) {
-        // For textareas
-        element.value = value;
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        filledCount++;
+
+        // Strategy 2: Case-insensitive match
+        if (!value) {
+          const fieldKeys = [field.id, field.name, field.label].filter(Boolean);
+          for (const key of fieldKeys) {
+            if (!key) continue;
+
+            const lowercaseKey = key.toLowerCase().trim();
+            if (normalizedData[lowercaseKey]) {
+              value = normalizedData[lowercaseKey];
+              break;
+            }
+
+            // Try without special characters
+            const simplifiedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (
+              simplifiedKey !== lowercaseKey &&
+              normalizedData[simplifiedKey]
+            ) {
+              value = normalizedData[simplifiedKey];
+              break;
+            }
+          }
+        }
+
+        // Strategy 3: Partial match (especially useful for long labels)
+        if (!value && field.label) {
+          for (const [key, val] of Object.entries(data)) {
+            if (
+              key.toLowerCase().includes(field.label.toLowerCase()) ||
+              field.label.toLowerCase().includes(key.toLowerCase())
+            ) {
+              value = val;
+              break;
+            }
+          }
+        }
+
+        // If still no value found, try one last strategy - look for key terms in field names/labels
+        if (!value) {
+          const commonFieldTerms: Record<string, string[]> = {
+            name: ['name', 'full name', 'first name', 'last name'],
+            email: ['email', 'e-mail', 'mail'],
+            phone: ['phone', 'telephone', 'mobile', 'cell'],
+            address: ['address', 'street', 'location'],
+            city: ['city', 'town'],
+            state: ['state', 'province', 'region'],
+            zip: ['zip', 'postal', 'zip code', 'postcode'],
+            country: ['country', 'nation'],
+          };
+
+          // Check if field matches any common terms
+          const fieldTexts = [field.id, field.name, field.label]
+            .filter(Boolean)
+            .map((t) => t.toLowerCase());
+
+          for (const [dataType, terms] of Object.entries(commonFieldTerms)) {
+            // Check if any field text contains any of the terms for this data type
+            const matchesTerm = terms.some((term) =>
+              fieldTexts.some((fieldText) => fieldText.includes(term))
+            );
+
+            if (matchesTerm) {
+              // Look for this data type in our AI data
+              for (const [key, val] of Object.entries(data)) {
+                if (terms.some((term) => key.toLowerCase().includes(term))) {
+                  value = val;
+                  break;
+                }
+              }
+              if (value) break;
+            }
+          }
+        }
+
+        // If still no value to fill, skip this field
+        if (!value) {
+          return;
+        }
+
+        // Fill based on element type with error handling
+        try {
+          if (element instanceof HTMLInputElement) {
+            // Skip file inputs - cannot set values on these for security reasons
+            if (element.type === 'file') {
+              console.log('Skipping file input:', element.name || element.id);
+              return;
+            }
+
+            if (element.type === 'checkbox' || element.type === 'radio') {
+              // For checkboxes and radio buttons
+              const valueAsLower = value.toLowerCase();
+              const isChecked =
+                valueAsLower === 'yes' ||
+                valueAsLower === 'true' ||
+                valueAsLower === 'checked' ||
+                valueAsLower === 'y' ||
+                valueAsLower === '1';
+
+              // For radio buttons, check if value matches option
+              if (element.type === 'radio' && element.value) {
+                if (
+                  element.value.toLowerCase() === valueAsLower ||
+                  element.value.toLowerCase().includes(valueAsLower) ||
+                  valueAsLower.includes(element.value.toLowerCase())
+                ) {
+                  element.checked = true;
+                }
+              } else {
+                element.checked = isChecked;
+              }
+            } else {
+              // For text, email, etc.
+              element.value = value;
+              // Dispatch input event to trigger any listeners
+              element.dispatchEvent(new Event('input', { bubbles: true }));
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            filledCount++;
+          } else if (element instanceof HTMLSelectElement) {
+            // For select dropdowns, try multiple strategies to find matching option
+            const options = Array.from(element.options);
+            let matched = false;
+
+            // Strategy 1: Find option with text that includes our value
+            const matchingOption = options.find(
+              (option) =>
+                option.text.toLowerCase().includes(value.toLowerCase()) ||
+                value.toLowerCase().includes(option.text.toLowerCase()) ||
+                option.value.toLowerCase() === value.toLowerCase()
+            );
+
+            if (matchingOption) {
+              element.value = matchingOption.value;
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+              matched = true;
+            } else {
+              // Strategy 2: Find closest matching option by text
+              let bestMatch = '';
+              let highestScore = 0;
+
+              options.forEach((option) => {
+                // Simple similarity score - count matching words
+                const optionWords = option.text.toLowerCase().split(/\s+/);
+                const valueWords = value.toLowerCase().split(/\s+/);
+
+                const matchingWords = optionWords.filter((word) =>
+                  valueWords.some(
+                    (valueWord) =>
+                      valueWord.includes(word) || word.includes(valueWord)
+                  )
+                );
+
+                const score =
+                  matchingWords.length /
+                  Math.max(optionWords.length, valueWords.length);
+
+                if (score > highestScore) {
+                  highestScore = score;
+                  bestMatch = option.value;
+                }
+              });
+
+              if (highestScore > 0.3) {
+                // Threshold for considering it a match
+                element.value = bestMatch;
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                matched = true;
+              }
+            }
+
+            if (matched) {
+              filledCount++;
+            }
+          } else if (element instanceof HTMLTextAreaElement) {
+            // For textareas
+            element.value = value;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            filledCount++;
+          }
+        } catch (error: unknown) {
+          console.error('Error filling field:', field, error);
+          fillErrors.push({
+            field,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } catch (error) {
+        console.error('Error filling field:', field, error);
+        fillErrors.push({
+          field,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     });
 
@@ -719,6 +1003,15 @@ const fillFormWithData = (data: Record<string, string>) => {
         'error',
         'No fields were filled. Data may not match the form.',
         'The AI-generated data could not be matched to any fields in the form. This form might have a complex structure or custom fields.'
+      );
+    }
+
+    if (fillErrors.length > 0) {
+      console.warn('Encountered errors while filling fields:', fillErrors);
+      sendStatusUpdate(
+        'warning',
+        'Some fields were not filled due to errors.',
+        'There were errors while filling some fields. Please check the console for more details.'
       );
     }
   } catch (error: any) {

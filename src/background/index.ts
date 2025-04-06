@@ -88,15 +88,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   } else if (message.type === 'OPEN_POPUP') {
-    // Create a notification to tell the user to click the extension icon
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icons/icon128.png',
-      title: 'OK!',
-      message: 'Click on the extension icon to continue',
-      priority: 2,
-    });
-
     // Add a badge to the extension icon
     chrome.action.setBadgeText({ text: '✓' });
     chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
