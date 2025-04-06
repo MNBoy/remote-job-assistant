@@ -616,7 +616,6 @@ const fillFormWithData = (data: Record<string, string>) => {
 
     // Go through each captured field and fill it if we have data
     capturedFormData.fields.forEach((field) => {
-      console.log('🚀 ~ capturedFormData.fields.forEach ~ field:', field);
       // Find the field by id or name
       let element: HTMLElement | null = null;
 
