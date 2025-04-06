@@ -427,6 +427,12 @@ const captureFormData = async () => {
         'No forms detected on this page. Please select a container with form fields.',
         'Click on "Select Container" to choose the container that has the form fields.'
       );
+
+      // Also send a separate message to reset the capturing state in the popup
+      chrome.runtime.sendMessage({
+        type: 'RESET_CAPTURE_STATE',
+      });
+
       return;
     }
 

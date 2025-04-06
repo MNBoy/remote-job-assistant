@@ -168,7 +168,14 @@ const Popup: React.FC = () => {
           setIsSelectingContainer(false);
           // Update storage to reflect that we're no longer selecting
           chrome.storage.local.set({ isSelectingContainer: false });
+        } else if (message.payload.status === 'info') {
+          // For info messages, we should still reset the capturing state
+          // This ensures buttons become re-enabled
+          setIsCapturing(false);
         }
+      } else if (message.type === 'RESET_CAPTURE_STATE') {
+        // Reset capturing state when explicitly requested
+        setIsCapturing(false);
       }
       return true;
     });

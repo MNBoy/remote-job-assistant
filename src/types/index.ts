@@ -35,6 +35,7 @@ export interface Message {
     | 'STATUS_UPDATE'
     | 'PROCESS_FORM'
     | 'UPDATE_RESUME'
-    | 'UPDATE_API_KEY';
+    | 'UPDATE_API_KEY'
+    | 'RESET_CAPTURE_STATE';
   payload: any;
 }
