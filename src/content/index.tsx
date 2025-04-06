@@ -423,7 +423,7 @@ const captureFormData = async () => {
     if (forms.length === 0) {
       // No forms found, prompt user to select a container instead
       sendStatusUpdate(
-        'error',
+        'warning',
         'No forms detected on this page. Please select a container with form fields.',
         'Click on "Select Container" to choose the container that has the form fields.'
       );
@@ -593,7 +593,6 @@ const fillFormWithData = (data: Record<string, string>) => {
     }
 
     sendStatusUpdate('processing', 'Filling form fields...');
-    console.log('Form data to fill:', data);
 
     // Determine which container to use for finding and filling fields
     let container: Element | null = null;
