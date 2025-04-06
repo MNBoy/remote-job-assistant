@@ -87,6 +87,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Send a success response
     sendResponse({ success: true });
     return true;
+  } else if (message.type === 'OPEN_POPUP') {
+    // Create a notification to tell the user to click the extension icon
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'OK!',
+      message: 'Click on the extension icon to continue',
+      priority: 2,
+    });
+
+    // Add a badge to the extension icon
+    chrome.action.setBadgeText({ text: '✓' });
+    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+
+    return true;
   }
 });
 
@@ -126,3 +141,19 @@ async function processFormWithAI(
 
 // Log that background script has loaded
 console.log('Remote Job Application Assistant background script loaded');
+
+// Handle notification clicks
+chrome.notifications.onClicked.addListener((notificationId) => {
+  // Check if this is our notification
+  chrome.storage.local.get(['lastNotificationId'], (result) => {
+    if (result.lastNotificationId === notificationId) {
+      // Open the popup in a new tab since chrome.action.openPopup() is unreliable
+      chrome.tabs.create({
+        url: 'popup.html',
+      });
+
+      // Clear the notification
+      chrome.notifications.clear(notificationId);
+    }
+  });
+});

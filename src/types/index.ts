@@ -25,6 +25,16 @@ export interface AIResponse {
 }
 
 export interface Message {
-  type: string;
+  type:
+    | 'CAPTURE_FORM'
+    | 'START_CONTAINER_SELECTION'
+    | 'CANCEL_CONTAINER_SELECTION'
+    | 'CHECK_SELECTION_STATUS'
+    | 'OPEN_POPUP'
+    | 'FILL_FORM'
+    | 'STATUS_UPDATE'
+    | 'PROCESS_FORM'
+    | 'UPDATE_RESUME'
+    | 'UPDATE_API_KEY';
   payload: any;
 }

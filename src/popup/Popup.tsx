@@ -62,6 +62,8 @@ CERTIFICATIONS
 
 const Popup: React.FC = () => {
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [isSelectingContainer, setIsSelectingContainer] =
+    useState<boolean>(false);
   const [status, setStatus] = useState<string>('idle');
   const [message, setMessage] = useState<string>('');
   const [resumeText, setResumeText] = useState<string>('');
@@ -73,15 +75,76 @@ const Popup: React.FC = () => {
   const [copiedSample, setCopiedSample] = useState<boolean>(false);
 
   useEffect(() => {
-    // Get saved resume and API key from chrome storage on component mount
-    chrome.storage.local.get(['userResume', 'geminiApiKey'], (result) => {
-      if (result.userResume) {
-        setResumeText(result.userResume);
+    // Clear badge when popup opens
+    chrome.action.setBadgeText({ text: '' });
+
+    // Get saved resume, API key and selection status from chrome storage
+    chrome.storage.local.get(
+      [
+        'userResume',
+        'geminiApiKey',
+        'isSelectingContainer',
+        'selection_success',
+        'selection_cancelled',
+      ],
+      (result) => {
+        // Load resume text
+        if (result.userResume) {
+          setResumeText(result.userResume);
+        }
+
+        // Load API key
+        if (result.geminiApiKey) {
+          setApiKey(result.geminiApiKey);
+        }
+
+        // Check if selection was successful and clear the flag
+        if (result.selection_success) {
+          setStatus('success');
+          setMessage(
+            'Form container successfully selected and analyzed. Ready to fill.'
+          );
+          // Clear the flag
+          chrome.storage.local.set({ selection_success: false });
+        }
+
+        // Check if selection was cancelled and clear the flag
+        if (result.selection_cancelled) {
+          setStatus('idle');
+          setMessage('Container selection was cancelled.');
+          // Clear the flag
+          chrome.storage.local.set({ selection_cancelled: false });
+        }
+
+        // Check if we're currently in selection mode
+        if (result.isSelectingContainer) {
+          setIsSelectingContainer(true);
+          setStatus('processing');
+          setMessage(
+            'Container selection mode is active. Please select a container with form fields on the page.'
+          );
+
+          // Double check with content script about actual selection status
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0].id) {
+              chrome.tabs.sendMessage(
+                tabs[0].id,
+                { type: 'CHECK_SELECTION_STATUS' },
+                (response) => {
+                  // If content script reports it's not actually selecting, update our state
+                  if (response && response.isSelecting === false) {
+                    setIsSelectingContainer(false);
+                    setStatus('idle');
+                    setMessage('');
+                    chrome.storage.local.set({ isSelectingContainer: false });
+                  }
+                }
+              );
+            }
+          });
+        }
       }
-      if (result.geminiApiKey) {
-        setApiKey(result.geminiApiKey);
-      }
-    });
+    );
 
     // Listen for messages from the content script or background script
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -92,9 +155,19 @@ const Popup: React.FC = () => {
         if (message.payload.status === 'error') {
           setError(message.payload.error || 'An unknown error occurred');
           setIsCapturing(false);
+          setIsSelectingContainer(false);
+          // Update storage to reflect that we're no longer selecting
+          chrome.storage.local.set({ isSelectingContainer: false });
         } else if (message.payload.status === 'success') {
           setError('');
           setIsCapturing(false);
+          setIsSelectingContainer(false);
+          // Update storage to reflect that we're no longer selecting
+          chrome.storage.local.set({ isSelectingContainer: false });
+        } else if (message.payload.status === 'idle') {
+          setIsSelectingContainer(false);
+          // Update storage to reflect that we're no longer selecting
+          chrome.storage.local.set({ isSelectingContainer: false });
         }
       }
       return true;
@@ -122,6 +195,60 @@ const Popup: React.FC = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0].id) {
         chrome.tabs.sendMessage(tabs[0].id, { type: 'CAPTURE_FORM' });
+      }
+    });
+  };
+
+  const handleContainerSelect = () => {
+    // Don't allow capture if resume or API key is missing
+    if (!resumeText.trim()) {
+      setError('Please add your resume before capturing a form');
+      return;
+    }
+
+    if (!apiKey.trim()) {
+      setError('Please add your Gemini API key before capturing a form');
+      return;
+    }
+
+    setError(''); // Clear any previous errors
+    setIsCapturing(true);
+    setIsSelectingContainer(true);
+    setStatus('processing');
+    setMessage('Please select a container with form fields...');
+
+    // Store selection state in chrome.storage
+    chrome.storage.local.set({ isSelectingContainer: true });
+
+    // Send message to content script to start container selection
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'START_CONTAINER_SELECTION',
+        });
+
+        // Close the popup to allow the user to see the page
+        window.close();
+      }
+    });
+  };
+
+  const handleCancelSelection = () => {
+    // Update local state
+    setIsSelectingContainer(false);
+    setIsCapturing(false);
+    setStatus('idle');
+    setMessage('Container selection cancelled.');
+
+    // Update storage
+    chrome.storage.local.set({ isSelectingContainer: false });
+
+    // Send message to content script to cancel container selection
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'CANCEL_CONTAINER_SELECTION',
+        });
       }
     });
   };
@@ -196,7 +323,7 @@ const Popup: React.FC = () => {
     <div className='p-4 bg-gray-50 min-h-screen'>
       <header className='mb-6'>
         <h1 className='text-2xl font-bold text-blue-600'>
-          Remote Job Assistant
+          Remote Job Application Assistant
         </h1>
         <p className='text-gray-600 text-sm'>
           Automate your job applications with Google Gemini
@@ -231,36 +358,76 @@ const Popup: React.FC = () => {
             {message ||
               'Capture the current form and let AI fill it out using your resume.'}
           </p>
-          <div className='flex space-x-2'>
-            <button
-              onClick={handleCapture}
-              disabled={isCapturing || !resumeText.trim() || !apiKey.trim()}
-              className={`flex-1 py-2 px-4 rounded-md text-white font-medium ${
-                isCapturing || !resumeText.trim() || !apiKey.trim()
-                  ? 'bg-blue-300 cursor-not-allowed'
-                  : 'bg-blue-500 hover:bg-blue-600'
-              }`}
-              title={
-                !resumeText.trim()
-                  ? 'Please add your resume first'
-                  : !apiKey.trim()
-                  ? 'Please add your API key first'
-                  : ''
-              }
-            >
-              {isCapturing ? 'Analyzing...' : 'Capture Form'}
-            </button>
-            <button
-              onClick={handleFill}
-              disabled={status !== 'success'}
-              className={`flex-1 py-2 px-4 rounded-md text-white font-medium ${
-                status !== 'success'
-                  ? 'bg-green-300 cursor-not-allowed'
-                  : 'bg-green-500 hover:bg-green-600'
-              }`}
-            >
-              Fill Form
-            </button>
+          <div className='flex flex-col space-y-2'>
+            {isSelectingContainer ? (
+              <div className='flex flex-col space-y-2'>
+                <div className='p-3 bg-purple-100 border border-purple-300 text-purple-800 rounded-md mb-1'>
+                  <p className='text-sm font-medium mb-1'>
+                    Container selection mode is active
+                  </p>
+                  <p className='text-xs'>
+                    Click on any element on the page that contains the form
+                    fields you want to fill.
+                  </p>
+                </div>
+                <button
+                  onClick={handleCancelSelection}
+                  className='w-full py-2 px-4 rounded-md text-white font-medium bg-red-500 hover:bg-red-600'
+                >
+                  Cancel Selection
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className='flex space-x-2'>
+                  <button
+                    onClick={handleCapture}
+                    disabled={
+                      isCapturing || !resumeText.trim() || !apiKey.trim()
+                    }
+                    className={`flex-1 py-2 px-4 rounded-md text-white font-medium ${
+                      isCapturing || !resumeText.trim() || !apiKey.trim()
+                        ? 'bg-blue-300 cursor-not-allowed'
+                        : 'bg-blue-500 hover:bg-blue-600'
+                    }`}
+                    title={
+                      !resumeText.trim()
+                        ? 'Please add your resume first'
+                        : !apiKey.trim()
+                        ? 'Please add your API key first'
+                        : ''
+                    }
+                  >
+                    {isCapturing ? 'Analyzing...' : 'Auto-Find Form'}
+                  </button>
+                  <button
+                    onClick={handleContainerSelect}
+                    disabled={
+                      isCapturing || !resumeText.trim() || !apiKey.trim()
+                    }
+                    className={`flex-1 py-2 px-4 rounded-md text-white font-medium ${
+                      isCapturing || !resumeText.trim() || !apiKey.trim()
+                        ? 'bg-purple-300 cursor-not-allowed'
+                        : 'bg-purple-500 hover:bg-purple-600'
+                    }`}
+                    title='Select a specific container that has form fields'
+                  >
+                    Select Container
+                  </button>
+                </div>
+                <button
+                  onClick={handleFill}
+                  disabled={status !== 'success'}
+                  className={`w-full py-2 px-4 rounded-md text-white font-medium ${
+                    status !== 'success'
+                      ? 'bg-green-300 cursor-not-allowed'
+                      : 'bg-green-500 hover:bg-green-600'
+                  }`}
+                >
+                  Fill Form
+                </button>
+              </>
+            )}
           </div>
         </div>
 
