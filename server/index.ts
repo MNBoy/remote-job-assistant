@@ -94,7 +94,9 @@ async function processFormWithAI(
   try {
     // Initialize Gemini API client with key from request
     const genAI = new GoogleGenerativeAI(formData.apiKey || '');
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+    const model = genAI.getGenerativeModel({
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite',
+    });
 
     // Get resume content from request payload
     const resumeContent = `Resume content:\n${formData.userResume}`;
