@@ -2,9 +2,7 @@
 
 A Chrome extension that automates filling out remote job application forms using AI and your resume.
 
-## Community & Resources
-
-### Video Tutorial
+## Video Tutorial
 
 Check out the demo and explanation on LinkedIn:
 [Remote Job Application Assistant Demo](https://www.linkedin.com/posts/moeinsalari_remotejobs-chromeextension-aitools-activity-7317073448936067072-A2S5)
